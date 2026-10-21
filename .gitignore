@@ -1,4 +1,4 @@
-# Secrets
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
@@ -6,14 +6,22 @@
 # Dependencies
 node_modules/
 
-# Build outputs
+# Next.js
 .next/
+out/
+
+# Build outputs
 dist/
 build/
 coverage/
 
 # Logs
 *.log
+pnpm-debug.log*
 
 # macOS
 .DS_Store
+
+# Editors
+.vscode/
+.idea/
