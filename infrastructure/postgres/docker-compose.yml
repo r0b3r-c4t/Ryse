@@ -10,14 +10,14 @@ services:
       POSTGRES_DB: postgres
 
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
 
     volumes:
       - ryse_postgres_data:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d postgres']
       interval: 5s
       timeout: 5s
       retries: 10
