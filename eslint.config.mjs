@@ -13,4 +13,13 @@ export default tseslint.config(
       'no-console': 'warn',
     },
   },
+  {
+    files: [
+      'apps/api-gateway/src/server.ts',
+      'services/identity-service/src/server.ts'
+    ],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 );
