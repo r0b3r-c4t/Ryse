@@ -1,7 +1,19 @@
 
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 
 import { prisma } from '../lib/prisma.js';
+
+const healthResponseSchema = z.object({
+  status: z.string().meta({ example: 'ok' }),
+  service: z.string().meta({ example: 'identity-service' }),
+});
+
+const databaseHealthResponseSchema = z.object({
+  status: z.enum(['ok', 'error']),
+  service: z.string().meta({ example: 'identity-service' }),
+  database: z.enum(['connected', 'disconnected']),
+});
 
 export const healthRoutes = async (
   app: FastifyInstance,
@@ -15,15 +27,9 @@ export const healthRoutes = async (
         description:
           'Comprueba que Identity Service está activo y puede responder solicitudes.',
         response: {
-          200: {
+          200: healthResponseSchema.meta({
             description: 'El servicio está funcionando correctamente.',
-            type: 'object',
-            properties: {
-              status: { type: 'string', example: 'ok' },
-              service: { type: 'string', example: 'identity-service' },
-            },
-            required: ['status', 'service'],
-          },
+          }),
         },
       },
     },
@@ -44,26 +50,12 @@ export const healthRoutes = async (
         description:
           'Ejecuta una consulta sencilla para verificar la disponibilidad de la base de datos.',
         response: {
-          200: {
+          200: databaseHealthResponseSchema.meta({
             description: 'La base de datos está conectada.',
-            type: 'object',
-            properties: {
-              status: { type: 'string', example: 'ok' },
-              service: { type: 'string', example: 'identity-service' },
-              database: { type: 'string', example: 'connected' },
-            },
-            required: ['status', 'service', 'database'],
-          },
-          503: {
+          }),
+          503: databaseHealthResponseSchema.meta({
             description: 'La base de datos no está disponible.',
-            type: 'object',
-            properties: {
-              status: { type: 'string', example: 'error' },
-              service: { type: 'string', example: 'identity-service' },
-              database: { type: 'string', example: 'disconnected' },
-            },
-            required: ['status', 'service', 'database'],
-          },
+          }),
         },
       },
     },
@@ -71,13 +63,13 @@ export const healthRoutes = async (
       try {
         await prisma.$queryRaw`SELECT 1`;
 
-        return reply.send({
+        return reply.code(200).send({
           status: 'ok',
           service: 'identity-service',
           database: 'connected',
         });
       } catch (error) {
-        app.log.error(error, 'Database health check failed');
+        app.log.error({ err: error }, 'Database health check failed');
 
         return reply.code(503).send({
           status: 'error',

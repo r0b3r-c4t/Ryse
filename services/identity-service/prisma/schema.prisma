@@ -7,11 +7,115 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AccountStatus {
+  ACTIVE
+  PENDING_DELETION
+}
+
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id           String  @id @default(cuid())
+  email        String  @unique @db.VarChar(320)
+  username     String  @unique @db.VarChar(30)
+  passwordHash String  @db.VarChar(255)
+  name         String? @db.VarChar(100)
+
+  status          AccountStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?     @db.Timestamptz(3)
+
+  avatarUrl      String? @db.VarChar(2048)
+  avatarPublicId String? @db.VarChar(255)
+
+  deletionRequestedAt DateTime? @db.Timestamptz(3)
+  scheduledDeletionAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  sessions           Session[]
+  emailVerifications EmailVerification[]
+  passwordResets     PasswordReset[]
+  auditEvents        SecurityAuditEvent[]
+
+  @@index([status, scheduledDeletionAt])
+}
+
+model Session {
+  id        String  @id @default(cuid())
+  userId    String
+  userAgent String? @db.VarChar(512)
+  ipAddress String? @db.VarChar(45)
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt DateTime? @db.Timestamptz(3)
+  expiresAt  DateTime  @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+model RefreshToken {
+  id        String @id @default(cuid())
+  sessionId String
+  tokenHash String @unique @db.VarChar(255)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, revokedAt])
+  @@index([expiresAt])
+}
+
+model EmailVerification {
+  id       String @id @default(cuid())
+  userId   String
+  codeHash String @db.VarChar(255)
+
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt     DateTime  @db.Timestamptz(3)
+  attemptCount  Int       @default(0)
+  consumedAt    DateTime? @db.Timestamptz(3)
+  invalidatedAt DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+model PasswordReset {
+  id        String @id @default(cuid())
+  userId    String
+  tokenHash String @unique @db.VarChar(255)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+model SecurityAuditEvent {
+  id         String   @id @default(cuid())
+  userId     String?
+  eventType  String   @db.VarChar(100)
+  occurredAt DateTime @default(now()) @db.Timestamptz(3)
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.VarChar(512)
+  metadata   Json?    @db.JsonB
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, occurredAt])
+  @@index([eventType, occurredAt])
 }
