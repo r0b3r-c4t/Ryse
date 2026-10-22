@@ -1,18 +1,70 @@
-import type { FastifyInstance } from 'fastify';
-import { Prisma } from '@prisma/client';
+
 import argon2 from 'argon2';
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from '@fastify/type-provider-zod';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
 import { prisma } from '../lib/prisma.js';
 
 const registerSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
-  email: z.string().trim().email().max(254),
-  password: z.string().min(12).max(128),
+
+  username: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(3, 'El nombre de usuario debe tener al menos 3 caracteres.')
+    .max(30, 'El nombre de usuario no puede superar los 30 caracteres.')
+    .regex(
+      /^[a-z0-9_]+$/,
+      'El nombre de usuario solo puede contener letras, números y guiones bajos.',
+    ),
+
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(254)
+    .pipe(z.email('El correo electrónico no es válido.')),
+
+  password: z
+    .string()
+    .min(8, 'La contraseña debe tener al menos 8 caracteres.')
+    .max(128, 'La contraseña no puede superar los 128 caracteres.'),
 });
 
-export const authRoutes = async (app: FastifyInstance): Promise<void> => {
-  app.post(
+const registerResponseSchema = z.object({
+  message: z.string(),
+  user: z.object({
+    id: z.string(),
+    name: z.string().nullable(),
+    username: z.string(),
+    email: z.email(),
+    createdAt: z.date(),
+  }),
+});
+
+const validationErrorSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+  details: z.array(
+    z.object({
+      field: z.string(),
+      message: z.string(),
+    }),
+  ),
+});
+
+const errorResponseSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+});
+
+export const authRoutes = async (
+  app: FastifyInstance,
+): Promise<void> => {
+  app.withTypeProvider<ZodTypeProvider>().post(
     '/auth/register',
     {
       attachValidation: true,
@@ -20,90 +72,37 @@ export const authRoutes = async (app: FastifyInstance): Promise<void> => {
         tags: ['Authentication'],
         summary: 'Registrar una cuenta',
         description:
-          'Crea una cuenta con correo y contraseña. El nombre es opcional y el correo se guarda en minúsculas.',
-        body: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              minLength: 1,
-              maxLength: 100,
-              description: 'Nombre visible de la persona.',
-            },
-            email: {
-              type: 'string',
-              format: 'email',
-              maxLength: 254,
-            },
-            password: {
-              type: 'string',
-              minLength: 12,
-              maxLength: 128,
-            },
-          },
-          required: ['email', 'password'],
-        },
+          'Crea una cuenta con nombre de usuario, correo y contraseña. El nombre visible es opcional.',
+        body: registerSchema,
         response: {
-          201: {
+          201: registerResponseSchema.meta({
             description: 'La cuenta se creó correctamente.',
-            type: 'object',
-            properties: {
-              message: { type: 'string', example: 'Usuario registrado correctamente.' },
-              user: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string', example: 'clx1234567890' },
-                  name: { type: 'string', nullable: true, example: 'Persona' },
-                  email: { type: 'string', format: 'email', example: 'persona@example.com' },
-                  createdAt: { type: 'string', format: 'date-time' },
-                },
-                required: ['id', 'name', 'email', 'createdAt'],
-              },
-            },
-            required: ['message', 'user'],
-          },
-          400: {
-            description: 'El cuerpo de la solicitud no cumple con los requisitos.',
-            type: 'object',
-            properties: {
-              error: { type: 'string', example: 'VALIDATION_ERROR' },
-              message: { type: 'string' },
-              details: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    field: { type: 'string' },
-                    message: { type: 'string' },
-                  },
-                  required: ['field', 'message'],
-                },
-              },
-            },
-            required: ['error', 'message', 'details'],
-          },
-          409: {
-            description: 'Ya existe una cuenta con ese correo electrónico.',
-            type: 'object',
-            properties: {
-              error: { type: 'string', example: 'EMAIL_ALREADY_REGISTERED' },
-              message: { type: 'string' },
-            },
-            required: ['error', 'message'],
-          },
-          500: {
-            description: 'Ocurrió un error inesperado al crear la cuenta.',
-            type: 'object',
-            properties: {
-              error: { type: 'string', example: 'INTERNAL_SERVER_ERROR' },
-              message: { type: 'string' },
-            },
-            required: ['error', 'message'],
-          },
+          }),
+          400: validationErrorSchema.meta({
+            description: 'Los datos proporcionados no son válidos.',
+          }),
+          409: errorResponseSchema.meta({
+            description:
+              'El correo o el nombre de usuario ya están registrados.',
+          }),
+          500: errorResponseSchema.meta({
+            description: 'Ocurrió un error inesperado.',
+          }),
         },
       },
     },
     async (request, reply) => {
+      // Primero, comprobar si Fastify detectó un error de validación.
+      if (request.validationError) {
+        return reply.code(400).send({
+          error: 'VALIDATION_ERROR',
+          message: 'Los datos proporcionados no son válidos.',
+          details: [],
+        });
+      }
+
+      // Después, ejecutar la validación de Zod para obtener
+      // los datos normalizados y los mensajes detallados.
       const validation = registerSchema.safeParse(request.body);
 
       if (!validation.success) {
@@ -117,8 +116,7 @@ export const authRoutes = async (app: FastifyInstance): Promise<void> => {
         });
       }
 
-      const { name, password } = validation.data;
-      const email = validation.data.email.toLowerCase();
+      const { name, username, email, password } = validation.data;
 
       try {
         const passwordHash = await argon2.hash(password, {
@@ -131,12 +129,14 @@ export const authRoutes = async (app: FastifyInstance): Promise<void> => {
         const user = await prisma.user.create({
           data: {
             name,
+            username,
             email,
             passwordHash,
           },
           select: {
             id: true,
             name: true,
+            username: true,
             email: true,
             createdAt: true,
           },
@@ -147,10 +147,33 @@ export const authRoutes = async (app: FastifyInstance): Promise<void> => {
           user,
         });
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          const target = error.meta?.target;
+          const fields = Array.isArray(target)
+            ? target.join(' ').toLowerCase()
+            : String(target ?? '').toLowerCase();
+
+          if (fields.includes('username')) {
+            return reply.code(409).send({
+              error: 'USERNAME_ALREADY_REGISTERED',
+              message: 'Este nombre de usuario ya está registrado.',
+            });
+          }
+
+          if (fields.includes('email')) {
+            return reply.code(409).send({
+              error: 'EMAIL_ALREADY_REGISTERED',
+              message: 'Este correo electrónico ya está registrado.',
+            });
+          }
+
           return reply.code(409).send({
-            error: 'EMAIL_ALREADY_REGISTERED',
-            message: 'Este correo electrónico ya está registrado.',
+            error: 'ACCOUNT_ALREADY_EXISTS',
+            message:
+              'No se pudo crear la cuenta porque uno de los datos únicos ya está registrado.',
           });
         }
 
@@ -158,7 +181,7 @@ export const authRoutes = async (app: FastifyInstance): Promise<void> => {
 
         return reply.code(500).send({
           error: 'INTERNAL_SERVER_ERROR',
-          message: 'Ocurrió un error al registrar el usuario.',
+          message: 'Ocurrió un error al registrar la cuenta.',
         });
       }
     },

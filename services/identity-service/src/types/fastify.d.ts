@@ -4,6 +4,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 interface RyseJwtPayload {
   sub: string;
   email: string;
+  sid: string;
 }
 
 declare module 'fastify' {

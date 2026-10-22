@@ -1,107 +1,72 @@
+
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from '@fastify/type-provider-zod';
 import argon2 from 'argon2';
 import { z } from 'zod';
 
 import { prisma } from '../lib/prisma.js';
 
 const loginSchema = z.object({
-  email: z.string().trim().email().max(254),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(254)
+    .pipe(z.email('El correo electrónico no es válido.')),
   password: z.string().min(1).max(128),
 });
 
-export const sessionRoutes = async (app: FastifyInstance): Promise<void> => {
-  app.post(
+const loginResponseSchema = z.object({
+  message: z.string().meta({ example: 'Inicio de sesión exitoso.' }),
+  accessToken: z.string().meta({ description: 'Token JWT de acceso.' }),
+  tokenType: z.string().meta({ example: 'Bearer' }),
+  expiresIn: z.number().int().meta({
+    example: 900,
+    description: 'Duración del token en segundos.',
+  }),
+  user: z.object({
+    id: z.string().meta({ example: 'clx1234567890' }),
+    name: z.string().nullable().meta({ example: 'Persona' }),
+    email: z.email().meta({ example: 'persona@example.com' }),
+  }),
+});
+
+const errorResponseSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+});
+
+export const sessionRoutes = async (
+  app: FastifyInstance,
+): Promise<void> => {
+  app.withTypeProvider<ZodTypeProvider>().post(
     '/auth/login',
     {
-      attachValidation: true,
       schema: {
         tags: ['Authentication'],
         summary: 'Iniciar sesión',
         description:
           'Valida las credenciales y devuelve un token de acceso JWT válido por 15 minutos.',
-        body: {
-          type: 'object',
-          properties: {
-            email: {
-              type: 'string',
-              format: 'email',
-              maxLength: 254,
-            },
-            password: {
-              type: 'string',
-              minLength: 1,
-              maxLength: 128,
-            },
-          },
-          required: ['email', 'password'],
-        },
+        body: loginSchema,
         response: {
-          200: {
+          200: loginResponseSchema.meta({
             description: 'Las credenciales son válidas.',
-            type: 'object',
-            properties: {
-              message: { type: 'string', example: 'Inicio de sesión exitoso.' },
-              accessToken: { type: 'string', description: 'Token JWT de acceso.' },
-              tokenType: { type: 'string', example: 'Bearer' },
-              expiresIn: {
-                type: 'integer',
-                example: 900,
-                description: 'Duración del token en segundos.',
-              },
-              user: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string', example: 'clx1234567890' },
-                  name: { type: 'string', nullable: true, example: 'Persona' },
-                  email: { type: 'string', format: 'email', example: 'persona@example.com' },
-                },
-                required: ['id', 'name', 'email'],
-              },
-            },
-            required: ['message', 'accessToken', 'tokenType', 'expiresIn', 'user'],
-          },
-          400: {
-            description: 'El cuerpo de la solicitud no cumple con los requisitos.',
-            type: 'object',
-            properties: {
-              error: { type: 'string', example: 'VALIDATION_ERROR' },
-              message: { type: 'string' },
-            },
-            required: ['error', 'message'],
-          },
-          401: {
+          }),
+          400: errorResponseSchema.meta({
+            description:
+              'El cuerpo de la solicitud no cumple con los requisitos.',
+          }),
+          401: errorResponseSchema.meta({
             description: 'El correo o la contraseña son incorrectos.',
-            type: 'object',
-            properties: {
-              error: { type: 'string', example: 'INVALID_CREDENTIALS' },
-              message: { type: 'string' },
-            },
-            required: ['error', 'message'],
-          },
-          500: {
+          }),
+          500: errorResponseSchema.meta({
             description: 'Ocurrió un error inesperado al iniciar sesión.',
-            type: 'object',
-            properties: {
-              error: { type: 'string', example: 'INTERNAL_SERVER_ERROR' },
-              message: { type: 'string' },
-            },
-            required: ['error', 'message'],
-          },
+          }),
         },
       },
     },
     async (request, reply) => {
-      const validation = loginSchema.safeParse(request.body);
-
-      if (!validation.success) {
-        return reply.code(400).send({
-          error: 'VALIDATION_ERROR',
-          message: 'Los datos proporcionados no son válidos.',
-        });
-      }
-
-      const email = validation.data.email.toLowerCase();
-      const { password } = validation.data;
+      const { email, password } = request.body;
 
       try {
         const user = await prisma.user.findUnique({
@@ -115,7 +80,10 @@ export const sessionRoutes = async (app: FastifyInstance): Promise<void> => {
           });
         }
 
-        const passwordMatches = await argon2.verify(user.passwordHash, password);
+        const passwordMatches = await argon2.verify(
+          user.passwordHash,
+          password,
+        );
 
         if (!passwordMatches) {
           return reply.code(401).send({
@@ -124,10 +92,18 @@ export const sessionRoutes = async (app: FastifyInstance): Promise<void> => {
           });
         }
 
+        const session = await prisma.session.create({
+          data: {
+            userId: user.id,
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+          },
+        });
+
         const token = app.jwt.sign(
           {
             sub: user.id,
             email: user.email,
+            sid: session.id,
           },
           {
             expiresIn: '15m',

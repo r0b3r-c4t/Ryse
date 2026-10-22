@@ -3,6 +3,10 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import jwt from '@fastify/jwt';
 import { z } from 'zod';
+import {
+  serializerCompiler,
+  validatorCompiler,
+} from '@fastify/type-provider-zod';
 
 import { sessionRoutes } from './routes/session.routes.js'
 import { registerSwagger } from './plugins/swagger.js';
@@ -22,6 +26,9 @@ const env = envSchema.parse(process.env);
 const app = Fastify({
   logger: true,
 });
+
+app.setValidatorCompiler(validatorCompiler);
+app.setSerializerCompiler(serializerCompiler);
 
 const start = async (): Promise<void> => {
   try {
