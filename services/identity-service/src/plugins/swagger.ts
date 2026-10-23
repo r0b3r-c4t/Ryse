@@ -31,6 +31,7 @@ export const registerSwagger = async (app: FastifyInstance): Promise<void> => {
             type: 'http',
             scheme: 'bearer',
             bearerFormat: 'JWT',
+            description: 'Introduce tu access token JWT.'
           },
         },
       },

@@ -1,10 +1,23 @@
-
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from '@fastify/type-provider-zod';
 import argon2 from 'argon2';
 import { z } from 'zod';
+import {
+  generateRefreshToken,
+  hashRefreshToken,
+} from '../lib/refresh-token.js';
 
 import { prisma } from '../lib/prisma.js';
+
+const REFRESH_COOKIE = 'ryse_refresh_token';
+
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  path: '/auth',
+};
+
 
 const loginSchema = z.object({
   email: z
@@ -92,11 +105,32 @@ export const sessionRoutes = async (
           });
         }
 
-        const session = await prisma.session.create({
-          data: {
-            userId: user.id,
-            expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-          },
+        const now = new Date();
+
+        const sessionExpiresAt = new Date(
+          now.getTime() + 30 * 24 * 60 * 60 * 1000,
+        );
+
+        const refreshToken = generateRefreshToken();
+        const refreshTokenHash = hashRefreshToken(refreshToken);
+
+        const session = await prisma.$transaction(async (tx) => {
+          const newSession = await tx.session.create({
+            data: {
+              userId: user.id,
+              expiresAt: sessionExpiresAt,
+            },
+          });
+
+          await tx.refreshToken.create({
+            data: {
+              sessionId: newSession.id,
+              tokenHash: refreshTokenHash,
+              expiresAt: sessionExpiresAt,
+            },
+          });
+
+          return newSession;
         });
 
         const token = app.jwt.sign(
@@ -109,6 +143,11 @@ export const sessionRoutes = async (
             expiresIn: '15m',
           },
         );
+
+        reply.setCookie(REFRESH_COOKIE, refreshToken, {
+          ...refreshCookieOptions,
+          maxAge: 30 * 24 * 60 * 60,
+        });
 
         return reply.code(200).send({
           message: 'Inicio de sesión exitoso.',
@@ -127,6 +166,93 @@ export const sessionRoutes = async (
         return reply.code(500).send({
           error: 'INTERNAL_SERVER_ERROR',
           message: 'Ocurrió un error al iniciar sesión.',
+        });
+      }
+    },
+  );
+
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/auth/logout',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        tags: ['Authentication'],
+        summary: 'Cerrar sesión',
+        description:
+          'Revoca la sesión actual y sus refresh tokens asociados.',
+        security: [{ BearerAuth: [] }],
+        response: {
+          200: z.object({
+            message: z.string(),
+          }).meta({
+            description: 'La sesión se cerró correctamente.',
+          }),
+          401: errorResponseSchema.meta({
+            description:
+              'El token es inválido o la sesión expiró o fue revocada.',
+          }),
+          500: errorResponseSchema.meta({
+            description: 'No fue posible cerrar la sesión.',
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.sub;
+      const sessionId = request.user.sid;
+      const revokedAt = new Date();
+
+      try {
+        const sessionRevoked = await prisma.$transaction(
+          async (tx) => {
+            const result = await tx.session.updateMany({
+              where: {
+                id: sessionId,
+                userId,
+                revokedAt: null,
+                expiresAt: { gt: revokedAt },
+              },
+              data: { revokedAt },
+            });
+
+            if (result.count !== 1) {
+              return false;
+            }
+
+            await tx.refreshToken.updateMany({
+              where: {
+                sessionId,
+                revokedAt: null,
+              },
+              data: { revokedAt },
+            });
+
+            return true;
+          },
+        );
+
+        if (!sessionRevoked) {
+          reply.clearCookie(REFRESH_COOKIE, refreshCookieOptions);
+
+          return reply.code(401).send({
+            error: 'UNAUTHORIZED',
+            message: 'La sesión ya expiró o fue cerrada.',
+          });
+        }
+        reply.clearCookie(REFRESH_COOKIE, refreshCookieOptions);
+
+        return reply.code(200).send({
+          message: 'Sesión cerrada correctamente.',
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          'Error al cerrar la sesión',
+        );
+
+        return reply.code(500).send({
+          error: 'INTERNAL_SERVER_ERROR',
+          message: 'No fue posible cerrar la sesión.',
         });
       }
     },
