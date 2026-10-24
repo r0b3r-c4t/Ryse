@@ -11,6 +11,7 @@ import {
 
 const REFRESH_COOKIE = 'ryse_refresh_token';
 const SESSION_DURATION_SECONDS = 30 * 24 * 60 * 60;
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 const cookieOptions = {
     httpOnly: true,
@@ -66,8 +67,19 @@ export const refreshRoutes = async (
 
             try {
                 const result = await prisma.$transaction(async (tx) => {
+                    const tokenId = await tx.$queryRaw<Array<{ id: string }>>`
+                        SELECT id
+                        FROM "RefreshToken"
+                        WHERE "tokenHash" = ${tokenHash}
+                        FOR UPDATE
+                    `;
+
+                    if (tokenId.length === 0) {
+                        return { kind: 'INVALID' as const };
+                    }
+
                     const storedToken = await tx.refreshToken.findUnique({
-                        where: { tokenHash },
+                        where: { id: tokenId[0].id },
                         include: {
                             session: {
                                 include: {
@@ -111,6 +123,35 @@ export const refreshRoutes = async (
                         session.expiresAt <= now ||
                         session.user.status !== 'ACTIVE'
                     ) {
+                        return { kind: 'INVALID' as const };
+                    }
+
+                    const lastActivity = session.lastUsedAt ?? session.createdAt;
+
+                    const isInactive =
+                        now.getTime() - lastActivity.getTime() >= IDLE_TIMEOUT_MS;
+
+                    if (isInactive) {
+                        await tx.session.updateMany({
+                            where: {
+                                id: session.id,
+                                revokedAt: null,
+                            },
+                            data: {
+                                revokedAt: now,
+                            },
+                        });
+
+                        await tx.refreshToken.updateMany({
+                            where: {
+                                sessionId: session.id,
+                                revokedAt: null,
+                            },
+                            data: {
+                                revokedAt: now,
+                            },
+                        });
+
                         return { kind: 'INVALID' as const };
                     }
 
