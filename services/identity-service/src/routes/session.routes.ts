@@ -72,6 +72,9 @@ export const sessionRoutes = async (
           401: errorResponseSchema.meta({
             description: 'El correo o la contraseña son incorrectos.',
           }),
+          403: errorResponseSchema.meta({
+            description: 'La cuenta no está disponible para iniciar sesión.',
+          }),
           500: errorResponseSchema.meta({
             description: 'Ocurrió un error inesperado al iniciar sesión.',
           }),
@@ -90,6 +93,13 @@ export const sessionRoutes = async (
           return reply.code(401).send({
             error: 'INVALID_CREDENTIALS',
             message: 'Correo electrónico o contraseña incorrectos.',
+          });
+        }
+
+        if (user.status !== 'ACTIVE') {
+          return reply.code(403).send({
+            error: 'ACCOUNT_NOT_ACTIVE',
+            message: 'La cuenta no está disponible para iniciar sesión.',
           });
         }
 
