@@ -207,4 +207,57 @@ export const identityRoutes = async (
       });
     },
   );
+  app.post(
+    '/api/v1/identity/auth/email-verification/request',
+    {
+      schema: {
+        tags: ['Authentication'],
+        summary: 'Solicitar verificación de correo',
+        description:
+          'Reenvía la solicitud de verificación de correo al Identity Service.',
+      },
+    },
+    async (request, reply) => {
+      await forwardToIdentityService(
+        request,
+        reply,
+        baseUrl,
+        '/auth/email-verification/request',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(request.body),
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/api/v1/identity/auth/email-verification/confirm',
+    {
+      schema: {
+        tags: ['Authentication'],
+        summary: 'Confirmar correo electrónico',
+        description:
+          'Reenvía el token de verificación al Identity Service.',
+      },
+    },
+    async (request, reply) => {
+      await forwardToIdentityService(
+        request,
+        reply,
+        baseUrl,
+        '/auth/email-verification/confirm',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(request.body),
+        },
+      );
+    },
+  );
 };
