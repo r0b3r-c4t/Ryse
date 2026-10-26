@@ -112,6 +112,80 @@ export const identityRoutes = async (
     },
   );
 
+  app.get(
+    '/api/v1/identity/auth/sessions',
+    {
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Listar sesiones activas',
+        description:
+          'Reenvía la consulta de sesiones activas al Identity Service.',
+        security: [{ BearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      await forwardToIdentityService(
+        request,
+        reply,
+        baseUrl,
+        '/auth/sessions',
+        {
+          method: 'GET',
+        },
+      );
+    },
+  );
+
+  app.delete(
+    '/api/v1/identity/auth/sessions/:sessionId',
+    {
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Revocar una sesión específica',
+        description:
+          'Reenvía la solicitud para revocar una sesión al Identity Service.',
+        security: [{ BearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+
+      await forwardToIdentityService(
+        request,
+        reply,
+        baseUrl,
+        `/auth/sessions/${encodeURIComponent(sessionId)}`,
+        {
+          method: 'DELETE',
+        },
+      );
+    },
+  );
+
+  app.delete(
+    '/api/v1/identity/auth/sessions',
+    {
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Revocar las demás sesiones',
+        description:
+          'Reenvía la solicitud para revocar todas las demás sesiones al Identity Service.',
+        security: [{ BearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      await forwardToIdentityService(
+        request,
+        reply,
+        baseUrl,
+        '/auth/sessions',
+        {
+          method: 'DELETE',
+        },
+      );
+    },
+  );
+
   app.post(
     '/api/v1/identity/auth/logout',
     {
