@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from '@fastify/type-provider-zod';
 import argon2 from 'argon2';
 import { z } from 'zod';
+import { sessionsResponseSchema } from '../schemas/sessions.schema.js';
 import {
   generateRefreshToken,
   hashRefreshToken,
@@ -172,6 +173,225 @@ export const sessionRoutes = async (
         return reply.code(500).send({
           error: 'INTERNAL_SERVER_ERROR',
           message: 'Ocurrió un error al iniciar sesión.',
+        });
+      }
+    },
+  );
+
+  app.withTypeProvider<ZodTypeProvider>().get(
+    '/auth/sessions',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Listar sesiones activas',
+        description:
+          'Devuelve las sesiones activas del usuario autenticado e identifica la sesión actual.',
+        security: [{ BearerAuth: [] }],
+        response: {
+          200: sessionsResponseSchema,
+          401: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.sub;
+      const currentSessionId = request.user.sid;
+      const now = new Date();
+
+      try {
+        const sessions = await prisma.session.findMany({
+          where: {
+            userId,
+            revokedAt: null,
+            expiresAt: { gt: now },
+          },
+          orderBy: [
+            { lastUsedAt: 'desc' },
+            { createdAt: 'desc' },
+          ],
+          select: {
+            id: true,
+            userAgent: true,
+            ipAddress: true,
+            createdAt: true,
+            lastUsedAt: true,
+            expiresAt: true,
+          },
+        });
+
+        return reply.code(200).send({
+          sessions: sessions.map((session) => ({
+            ...session,
+            createdAt: session.createdAt.toISOString(),
+            lastUsedAt: session.lastUsedAt?.toISOString() ?? null,
+            expiresAt: session.expiresAt.toISOString(),
+            isCurrent: session.id === currentSessionId,
+          })),
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          'Error al consultar las sesiones activas',
+        );
+
+        return reply.code(500).send({
+          error: 'INTERNAL_SERVER_ERROR',
+          message: 'No fue posible consultar las sesiones activas.',
+        });
+      }
+    },
+  );
+
+  app.delete(
+    '/auth/sessions/:sessionId',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Revocar una sesión específica',
+        description:
+          'Revoca una sesión perteneciente al usuario autenticado y sus refresh tokens.',
+        security: [{ BearerAuth: [] }],
+        params: z.object({
+          sessionId: z.string().min(1),
+        }),
+        response: {
+          200: z.object({
+            message: z.string(),
+          }),
+          400: errorResponseSchema,
+          401: errorResponseSchema,
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+      const userId = request.user.sub;
+      const revokedAt = new Date();
+
+      try {
+        const revoked = await prisma.$transaction(async (tx) => {
+          const result = await tx.session.updateMany({
+            where: {
+              id: sessionId,
+              userId,
+              revokedAt: null,
+              expiresAt: { gt: revokedAt },
+            },
+            data: { revokedAt },
+          });
+
+          if (result.count !== 1) {
+            return false;
+          }
+
+          await tx.refreshToken.updateMany({
+            where: {
+              sessionId,
+              revokedAt: null,
+            },
+            data: { revokedAt },
+          });
+
+          return true;
+        });
+
+        if (!revoked) {
+          return reply.code(404).send({
+            error: 'SESSION_NOT_FOUND',
+            message: 'La sesión no existe o ya no está activa.',
+          });
+        }
+
+        return reply.code(200).send({
+          message: 'Sesión revocada correctamente.',
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          'Error al revocar una sesión',
+        );
+
+        return reply.code(500).send({
+          error: 'INTERNAL_SERVER_ERROR',
+          message: 'No fue posible revocar la sesión.',
+        });
+      }
+    },
+  ); 
+  
+  app.delete(
+    '/auth/sessions',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Revocar las demás sesiones',
+        description:
+          'Revoca todas las sesiones activas del usuario autenticado, excepto la actual.',
+        security: [{ BearerAuth: [] }],
+        response: {
+          200: z.object({
+            message: z.string(),
+            revokedCount: z.number().int().nonnegative(),
+          }),
+          401: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.sub;
+      const currentSessionId = request.user.sid;
+      const revokedAt = new Date();
+
+      try {
+        const revokedCount = await prisma.$transaction(async (tx) => {
+          const result = await tx.session.updateMany({
+            where: {
+              userId,
+              id: { not: currentSessionId },
+              revokedAt: null,
+              expiresAt: { gt: revokedAt },
+            },
+            data: {
+              revokedAt,
+            },
+          });
+
+          await tx.refreshToken.updateMany({
+            where: {
+              session: {
+                userId,
+                id: { not: currentSessionId },
+              },
+              revokedAt: null,
+            },
+            data: {
+              revokedAt,
+            },
+          });
+
+          return result.count;
+        });
+
+        return reply.code(200).send({
+          message: 'Las demás sesiones fueron revocadas correctamente.',
+          revokedCount,
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          'Error al revocar las demás sesiones',
+        );
+
+        return reply.code(500).send({
+          error: 'INTERNAL_SERVER_ERROR',
+          message: 'No fue posible revocar las demás sesiones.',
         });
       }
     },
