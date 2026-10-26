@@ -111,4 +111,26 @@ export const identityRoutes = async (
       });
     },
   );
+
+  app.post(
+    '/api/v1/identity/auth/logout',
+    {
+      schema: {
+        tags: ['Authentication'],
+        summary: 'Cerrar sesión',
+        description:
+          'Reenvía la solicitud autenticada al Identity Service para cerrar la sesión.',
+        security: [{ BearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      await forwardToIdentityService(request, reply, baseUrl, '/auth/logout', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(request.body ?? {}),
+      });
+    },
+  );
 };

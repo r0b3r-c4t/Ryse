@@ -3,63 +3,16 @@ import argon2 from 'argon2';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from '@fastify/type-provider-zod';
 import { Prisma } from '@prisma/client';
-import { z } from 'zod';
 
 import { prisma } from '../lib/prisma.js';
-
-const registerSchema = z.object({
-  name: z.string().trim().min(1).max(100).optional(),
-
-  username: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .min(3, 'El nombre de usuario debe tener al menos 3 caracteres.')
-    .max(30, 'El nombre de usuario no puede superar los 30 caracteres.')
-    .regex(
-      /^[a-z0-9_]+$/,
-      'El nombre de usuario solo puede contener letras, números y guiones bajos.',
-    ),
-
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .max(254)
-    .pipe(z.email('El correo electrónico no es válido.')),
-
-  password: z
-    .string()
-    .min(8, 'La contraseña debe tener al menos 8 caracteres.')
-    .max(128, 'La contraseña no puede superar los 128 caracteres.'),
-});
-
-const registerResponseSchema = z.object({
-  message: z.string(),
-  user: z.object({
-    id: z.string(),
-    name: z.string().nullable(),
-    username: z.string(),
-    email: z.email(),
-    createdAt: z.date(),
-  }),
-});
-
-const validationErrorSchema = z.object({
-  error: z.string(),
-  message: z.string(),
-  details: z.array(
-    z.object({
-      field: z.string(),
-      message: z.string(),
-    }),
-  ),
-});
-
-const errorResponseSchema = z.object({
-  error: z.string(),
-  message: z.string(),
-});
+import {
+  registerSchema,
+  registerResponseSchema,
+} from '../schemas/auth.schema.js';
+import {
+  errorResponseSchema,
+  validationErrorSchema,
+} from '../schemas/common.schema.js';
 
 export const authRoutes = async (
   app: FastifyInstance,
@@ -92,24 +45,17 @@ export const authRoutes = async (
       },
     },
     async (request, reply) => {
-      // Primero, comprobar si Fastify detectó un error de validación.
-      if (request.validationError) {
-        return reply.code(400).send({
-          error: 'VALIDATION_ERROR',
-          message: 'Los datos proporcionados no son válidos.',
-          details: [],
-        });
-      }
-
-      // Después, ejecutar la validación de Zod para obtener
-      // los datos normalizados y los mensajes detallados.
       const validation = registerSchema.safeParse(request.body);
 
-      if (!validation.success) {
+      if (request.validationError || !validation.success) {
+        const issues = validation.success
+          ? []
+          : validation.error.issues;
+
         return reply.code(400).send({
           error: 'VALIDATION_ERROR',
           message: 'Los datos proporcionados no son válidos.',
-          details: validation.error.issues.map((issue) => ({
+          details: issues.map((issue) => ({
             field: issue.path.join('.'),
             message: issue.message,
           })),
