@@ -49,7 +49,11 @@ export const registerResponseSchema = z.object({
   user: z.object({
     id: z.string(),
     name: z.string().nullable(),
-    username: usernameSchema,
+    username: z
+      .string()
+      .min(3)
+      .max(30)
+      .regex(/^[a-z0-9_]+$/),
     email: z.email(),
     createdAt: z.date(),
   }),

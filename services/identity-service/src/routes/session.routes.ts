@@ -6,6 +6,15 @@ import {
   generateRefreshToken,
   hashRefreshToken,
 } from '../lib/refresh-token.js';
+import {
+  loginSchema,
+  loginResponseSchema,
+} from '../schemas/auth.schema.js';
+
+import {
+  errorResponseSchema,
+  validationErrorSchema,
+} from '../schemas/common.schema.js';
 
 import { prisma } from '../lib/prisma.js';
 
@@ -18,43 +27,13 @@ const refreshCookieOptions = {
   path: '/auth',
 };
 
-
-const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .max(254)
-    .pipe(z.email('El correo electrónico no es válido.')),
-  password: z.string().min(1).max(128),
-});
-
-const loginResponseSchema = z.object({
-  message: z.string().meta({ example: 'Inicio de sesión exitoso.' }),
-  accessToken: z.string().meta({ description: 'Token JWT de acceso.' }),
-  tokenType: z.string().meta({ example: 'Bearer' }),
-  expiresIn: z.number().int().meta({
-    example: 900,
-    description: 'Duración del token en segundos.',
-  }),
-  user: z.object({
-    id: z.string().meta({ example: 'clx1234567890' }),
-    name: z.string().nullable().meta({ example: 'Persona' }),
-    email: z.email().meta({ example: 'persona@example.com' }),
-  }),
-});
-
-const errorResponseSchema = z.object({
-  error: z.string(),
-  message: z.string(),
-});
-
 export const sessionRoutes = async (
   app: FastifyInstance,
 ): Promise<void> => {
   app.withTypeProvider<ZodTypeProvider>().post(
     '/auth/login',
     {
+      attachValidation: true,
       schema: {
         tags: ['Authentication'],
         summary: 'Iniciar sesión',
@@ -65,7 +44,7 @@ export const sessionRoutes = async (
           200: loginResponseSchema.meta({
             description: 'Las credenciales son válidas.',
           }),
-          400: errorResponseSchema.meta({
+          400: validationErrorSchema.meta({
             description:
               'El cuerpo de la solicitud no cumple con los requisitos.',
           }),
@@ -82,7 +61,24 @@ export const sessionRoutes = async (
       },
     },
     async (request, reply) => {
-      const { email, password } = request.body;
+      const validation = loginSchema.safeParse(request.body);
+
+      if (request.validationError || !validation.success) {
+        const issues = validation.success
+          ? []
+          : validation.error.issues;
+
+        return reply.code(400).send({
+          error: 'VALIDATION_ERROR',
+          message: 'Los datos proporcionados no son válidos.',
+          details: issues.map((issue) => ({
+            field: issue.path.join('.'),
+            message: issue.message,
+          })),
+        });
+      }
+
+      const { email, password } = validation.data;
 
       try {
         const user = await prisma.user.findUnique({
