@@ -7,8 +7,8 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from '@fastify/type-provider-zod';
+import { emailVerificationRoutes } from './routes/email-verification.routes.js';
 import { refreshRoutes } from './routes/refresh.routes.js';
-
 import { sessionRoutes } from './routes/session.routes.js'
 import { registerSwagger } from './plugins/swagger.js';
 import { healthRoutes } from './routes/health.routes.js';
@@ -23,6 +23,7 @@ const envSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.coerce.number().int().min(1).max(65535),
   JWT_SECRET: z.string().min(1),
+  RESEND_API_KEY: z.string().min(1),
 });
 
 const env = envSchema.parse(process.env);
@@ -44,6 +45,7 @@ const start = async (): Promise<void> => {
     
     await app.register(healthRoutes);
     await app.register(authRoutes);
+    await app.register(emailVerificationRoutes);
     await app.register(sessionRoutes);
     await app.register(refreshRoutes);
     await app.register(meRoutes);

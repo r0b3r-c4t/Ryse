@@ -1,4 +1,3 @@
-
 import type { FastifyInstance } from 'fastify';
 import jwt from '@fastify/jwt';
 

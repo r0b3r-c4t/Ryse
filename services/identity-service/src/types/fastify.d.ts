@@ -1,4 +1,3 @@
-
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 interface RyseJwtPayload {
