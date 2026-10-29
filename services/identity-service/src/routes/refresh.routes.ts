@@ -4,9 +4,9 @@ import { z } from 'zod';
 
 import { prisma } from '../lib/prisma.js';
 import {
-    generateRefreshToken,
-    hashRefreshToken,
-} from '../lib/refresh-token.js';
+    generateSecureToken,
+    hashToken,
+} from '../lib/crypto.js';
 
 const REFRESH_COOKIE = 'ryse_refresh_token';
 const SESSION_DURATION_SECONDS = 30 * 24 * 60 * 60;
@@ -60,9 +60,9 @@ export const refreshRoutes = async (
             }
 
             const now = new Date();
-            const tokenHash = hashRefreshToken(rawToken);
-            const replacementToken = generateRefreshToken();
-            const replacementHash = hashRefreshToken(replacementToken);
+            const tokenHash = hashToken(rawToken);
+            const replacementToken = generateSecureToken();
+            const replacementHash = hashToken(replacementToken);
 
             try {
                 const result = await prisma.$transaction(async (tx) => {
