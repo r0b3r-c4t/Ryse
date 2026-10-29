@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from '@fastify/type-provider-zod';
-import argon2 from 'argon2';
 import { z } from 'zod';
 import { sessionsResponseSchema } from '../schemas/sessions.schema.js';
 import {
-  generateRefreshToken,
-  hashRefreshToken,
-} from '../lib/refresh-token.js';
+  generateSecureToken,
+  verifyPassword,
+  hashToken,
+} from '../lib/crypto.js';
 import {
   loginSchema,
   loginResponseSchema,
@@ -100,7 +100,7 @@ export const sessionRoutes = async (
           });
         }
 
-        const passwordMatches = await argon2.verify(
+        const passwordMatches = await verifyPassword(
           user.passwordHash,
           password,
         );
@@ -118,8 +118,8 @@ export const sessionRoutes = async (
           now.getTime() + 30 * 24 * 60 * 60 * 1000,
         );
 
-        const refreshToken = generateRefreshToken();
-        const refreshTokenHash = hashRefreshToken(refreshToken);
+        const refreshToken = generateSecureToken();
+        const refreshTokenHash = hashToken(refreshToken);
 
         const session = await prisma.$transaction(async (tx) => {
           const newSession = await tx.session.create({
@@ -332,7 +332,7 @@ export const sessionRoutes = async (
         tags: ['Sessions'],
         summary: 'Revocar las demás sesiones',
         description:
-          'Revoca todas las sesiones activas del usuario autenticado, excepto la actual.',
+          'Revoca todas las sesiones activas del usuario autenticado, excepto la actual, e invalida sus refresh tokens.',
         security: [{ BearerAuth: [] }],
         response: {
           200: z.object({

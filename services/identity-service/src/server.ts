@@ -1,29 +1,32 @@
 import 'dotenv/config';
 
+// Dependencias externas
 import cookie from '@fastify/cookie';
+import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import Fastify from 'fastify';
 import { z } from 'zod';
-import {
-  serializerCompiler,
-  validatorCompiler,
-} from '@fastify/type-provider-zod';
-import { emailVerificationRoutes } from './routes/email-verification.routes.js';
-import { refreshRoutes } from './routes/refresh.routes.js';
-import { sessionRoutes } from './routes/session.routes.js'
-import { registerSwagger } from './plugins/swagger.js';
-import { healthRoutes } from './routes/health.routes.js';
-import { authRoutes } from './routes/auth.routes.js';
+
+// Plugins
 import { registerAuthentication } from './plugins/authenticate.js';
-import { meRoutes } from './routes/me.routes.js';
 import { registerJwt } from './plugins/jwt.js';
+import { registerSwagger } from './plugins/swagger.js';
 
-
+// Rutas
+import { authRoutes } from './routes/auth.routes.js';
+import { emailVerificationRoutes } from './routes/email-verification.routes.js';
+import { healthRoutes } from './routes/health.routes.js';
+import { meRoutes } from './routes/me.routes.js';
+import { passwordChangeRoutes } from './routes/password-change.routes.js';
+import { passwordResetRoutes } from './routes/password-reset.routes.js';
+import { refreshRoutes } from './routes/refresh.routes.js';
+import { sessionRoutes } from './routes/session.routes.js';
 
 const envSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.coerce.number().int().min(1).max(65535),
   JWT_SECRET: z.string().min(1),
   RESEND_API_KEY: z.string().min(1),
+  APP_URL: z.string().url(),
 });
 
 const env = envSchema.parse(process.env);
@@ -42,10 +45,14 @@ const start = async (): Promise<void> => {
 
     await registerAuthentication(app);
     await registerSwagger(app);
-    
+
     await app.register(healthRoutes);
     await app.register(authRoutes);
     await app.register(emailVerificationRoutes);
+    await app.register(passwordChangeRoutes);
+    await app.register(passwordResetRoutes, {
+      appUrl: env.APP_URL,
+    });
     await app.register(sessionRoutes);
     await app.register(refreshRoutes);
     await app.register(meRoutes);

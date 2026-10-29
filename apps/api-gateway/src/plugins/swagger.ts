@@ -26,6 +26,10 @@ export const registerSwagger = async (
           name: 'Identity',
           description: 'Identidad y perfil del usuario autenticado.',
         },
+        {
+          name: 'Sessions',
+          description: 'Gestión de las sesiones autenticadas.',
+        },
       ],
       components: {
         securitySchemes: {
